@@ -15,6 +15,7 @@ package page
 
 import (
 	"fmt"
+	"hash/crc32"
 	"os"
 	"path"
 	"path/filepath"
@@ -85,6 +86,7 @@ func NewPermalinkExpander(ps *helpers.PathSpec) (PermalinkExpander, error) {
 		"slug":           p.pageToPermalinkSlugElseTitle,
 		"slugorfilename": p.pageToPermalinkSlugElseFilename,
 		"filename":       p.pageToPermalinkFilename,
+		"abbrlink":       p.pageToPermalinkAbbrlink,
 	}
 
 	patterns := ps.Cfg.GetStringMapString("permalinks")
@@ -257,6 +259,19 @@ func (l PermalinkExpander) pageToPermalinkFilename(p Page, _ string) (string, er
 	}
 
 	return l.ps.URLize(name), nil
+}
+
+func (l PermalinkExpander) pageToPermalinkAbbrlink(p Page, _ string) (string, error) {
+	name := p.File().TranslationBaseName()
+	if name == "index" {
+		// Page bundles; the directory name will hopefully have a better name.
+		dir := strings.TrimSuffix(p.File().Dir(), helpers.FilePathSeparator)
+		_, name = filepath.Split(dir)
+	}
+
+	crc32q := crc32.MakeTable(crc32.IEEE)
+	abbrlink := fmt.Sprintf("%08x", crc32.Checksum([]byte(name), crc32q))
+	return abbrlink, nil
 }
 
 // if the page has a slug, return the slug, else return the title
