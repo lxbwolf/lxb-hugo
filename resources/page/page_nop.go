@@ -521,6 +521,10 @@ func (p *nopPage) Weight() int {
 	return 0
 }
 
+func (p *nopPage) AbbrLink() string {
+	return ""
+}
+
 func (p *nopPage) WordCount(context.Context) int {
 	return 0
 }

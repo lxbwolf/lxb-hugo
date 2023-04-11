@@ -258,6 +258,8 @@ type PageMetaProvider interface {
 	// The configured weight, used as the first sort value in the default
 	// page sort if non-zero.
 	Weight() int
+
+	AbbrLink() string
 }
 
 // PageRenderProvider provides a way for a Page to render content.

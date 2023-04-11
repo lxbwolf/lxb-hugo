@@ -78,7 +78,8 @@ type pageMeta struct {
 
 	resourcePath string
 
-	weight int
+	weight   int
+	abbrlink string
 
 	markup      string
 	contentType string
@@ -324,6 +325,10 @@ func (p *pageMeta) Weight() int {
 	return p.weight
 }
 
+func (p *pageMeta) AbbrLink() string {
+	return p.abbrlink
+}
+
 func (pm *pageMeta) mergeBucketCascades(b1, b2 *pagesMapBucket) {
 	if b1.cascade == nil {
 		b1.cascade = make(map[page.PageMatcher]maps.Params)
@@ -526,6 +531,9 @@ func (pm *pageMeta) setMetadata(parentBucket *pagesMapBucket, p *pageState, fron
 		case "weight":
 			pm.weight = cast.ToInt(v)
 			pm.params[loki] = pm.weight
+		case "abbrlink":
+			pm.abbrlink = cast.ToString(v)
+			pm.params[loki] = pm.abbrlink
 		case "aliases":
 			pm.aliases = cast.ToStringSlice(v)
 			for i, alias := range pm.aliases {

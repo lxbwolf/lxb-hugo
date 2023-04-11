@@ -16,6 +16,7 @@ package hugolib
 import (
 	"context"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"path/filepath"
 	"strings"
@@ -70,11 +71,13 @@ func (f ContentFactory) ApplyArchetypeTemplate(w io.Writer, p page.Page, archety
 		archetypeKind = p.Type()
 	}
 
+	myabbrlink, _ := f.toPermalinkAbbrlink(p)
 	d := &archetypeFileData{
-		Type: archetypeKind,
-		Date: htime.Now().Format(time.RFC3339),
-		Page: p,
-		File: p.File(),
+		Type:     archetypeKind,
+		Date:     htime.Now().Format(time.RFC3339),
+		Page:     p,
+		File:     p.File(),
+		AbbrLink: myabbrlink,
 	}
 
 	templateSource = f.shortcodeReplacerPre.Replace(templateSource)
@@ -93,6 +96,19 @@ func (f ContentFactory) ApplyArchetypeTemplate(w io.Writer, p page.Page, archety
 
 	return err
 
+}
+
+func (f ContentFactory) toPermalinkAbbrlink(p page.Page) (string, error) {
+	name := p.File().TranslationBaseName()
+	if name == "index" {
+		// Page bundles; the directory name will hopefully have a better name.
+		dir := strings.TrimSuffix(p.File().Dir(), helpers.FilePathSeparator)
+		_, name = filepath.Split(dir)
+	}
+
+	crc32q := crc32.MakeTable(crc32.IEEE)
+	abbrlink := fmt.Sprintf("%08x", crc32.Checksum([]byte(name), crc32q))
+	return abbrlink, nil
 }
 
 func (f ContentFactory) SectionFromFilename(filename string) (string, error) {
@@ -170,6 +186,7 @@ type archetypeFileData struct {
 	// File is the same as Page.File, embedded here for historic reasons.
 	// TODO(bep) make this a method.
 	source.File
+	AbbrLink string
 }
 
 func (f *archetypeFileData) Site() page.Site {
