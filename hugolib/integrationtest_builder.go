@@ -3,6 +3,7 @@ package hugolib
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,14 +13,16 @@ import (
 	"sync"
 	"testing"
 
-	jww "github.com/spf13/jwalterweatherman"
+	"github.com/bep/logg"
 
 	qt "github.com/frankban/quicktest"
 	"github.com/fsnotify/fsnotify"
 	"github.com/gohugoio/hugo/common/herrors"
 	"github.com/gohugoio/hugo/common/hexec"
 	"github.com/gohugoio/hugo/common/loggers"
+	"github.com/gohugoio/hugo/common/maps"
 	"github.com/gohugoio/hugo/config"
+	"github.com/gohugoio/hugo/config/allconfig"
 	"github.com/gohugoio/hugo/config/security"
 	"github.com/gohugoio/hugo/deps"
 	"github.com/gohugoio/hugo/helpers"
@@ -194,10 +197,11 @@ func (s *IntegrationTestBuilder) Build() *IntegrationTestBuilder {
 	if s.Cfg.Verbose || err != nil {
 		fmt.Println(s.logBuff.String())
 	}
+	s.Assert(err, qt.IsNil)
 	if s.Cfg.RunGC {
 		s.GCCount, err = s.H.GC()
 	}
-	s.Assert(err, qt.IsNil)
+
 	return s
 }
 
@@ -207,7 +211,7 @@ func (s *IntegrationTestBuilder) BuildE() (*IntegrationTestBuilder, error) {
 		return s, err
 	}
 
-	err := s.build(BuildCfg{})
+	err := s.build(s.Cfg.BuildCfg)
 	return s, err
 }
 
@@ -288,17 +292,25 @@ func (s *IntegrationTestBuilder) initBuilder() error {
 		}
 
 		if s.Cfg.LogLevel == 0 {
-			s.Cfg.LogLevel = jww.LevelWarn
+			s.Cfg.LogLevel = logg.LevelWarn
 		}
 
-		logger := loggers.NewBasicLoggerForWriter(s.Cfg.LogLevel, &s.logBuff)
-
 		isBinaryRe := regexp.MustCompile(`^(.*)(\.png|\.jpg)$`)
+
+		const dataSourceFilenamePrefix = "sourcefilename:"
 
 		for _, f := range s.data.Files {
 			filename := filepath.Join(s.Cfg.WorkingDir, f.Name)
 			data := bytes.TrimSuffix(f.Data, []byte("\n"))
-			if isBinaryRe.MatchString(filename) {
+			datastr := strings.TrimSpace(string(data))
+			if strings.HasPrefix(datastr, dataSourceFilenamePrefix) {
+				// Read from file relative to tue current dir.
+				var err error
+				wd, _ := os.Getwd()
+				filename := filepath.Join(wd, strings.TrimSpace(strings.TrimPrefix(datastr, dataSourceFilenamePrefix)))
+				data, err = os.ReadFile(filename)
+				s.Assert(err, qt.IsNil)
+			} else if isBinaryRe.MatchString(filename) {
 				var err error
 				data, err = base64.StdEncoding.DecodeString(string(data))
 				s.Assert(err, qt.IsNil)
@@ -308,36 +320,56 @@ func (s *IntegrationTestBuilder) initBuilder() error {
 			s.Assert(afero.WriteFile(afs, filename, data, 0666), qt.IsNil)
 		}
 
-		configDirFilename := filepath.Join(s.Cfg.WorkingDir, "config")
-		if _, err := afs.Stat(configDirFilename); err != nil {
-			configDirFilename = ""
+		configDir := "config"
+		if _, err := afs.Stat(filepath.Join(s.Cfg.WorkingDir, "config")); err != nil {
+			configDir = ""
 		}
 
-		cfg, _, err := LoadConfig(
-			ConfigSourceDescriptor{
-				WorkingDir:   s.Cfg.WorkingDir,
-				AbsConfigDir: configDirFilename,
-				Fs:           afs,
-				Logger:       logger,
-				Environ:      []string{},
-			},
-			func(cfg config.Provider) error {
-				return nil
+		var flags config.Provider
+		if s.Cfg.BaseCfg != nil {
+			flags = s.Cfg.BaseCfg
+		} else {
+			flags = config.New()
+		}
+
+		if s.Cfg.Running {
+			flags.Set("internal", maps.Params{
+				"running": s.Cfg.Running,
+				"watch":   s.Cfg.Running,
+			})
+		}
+
+		if s.Cfg.WorkingDir != "" {
+			flags.Set("workingDir", s.Cfg.WorkingDir)
+		}
+
+		res, err := allconfig.LoadConfig(
+			allconfig.ConfigSourceDescriptor{
+				Flags:     flags,
+				ConfigDir: configDir,
+				Fs:        afs,
+				Logger:    loggers.NewDefault(),
+				Environ:   s.Cfg.Environ,
 			},
 		)
 
+		if err != nil {
+			initErr = err
+			return
+		}
+
+		fs := hugofs.NewFrom(afs, res.LoadingInfo.BaseConfig)
+
 		s.Assert(err, qt.IsNil)
 
-		cfg.Set("workingDir", s.Cfg.WorkingDir)
-
-		fs := hugofs.NewFrom(afs, cfg)
-
-		s.Assert(err, qt.IsNil)
-
-		depsCfg := deps.DepsCfg{Cfg: cfg, Fs: fs, Running: s.Cfg.Running, Logger: logger}
+		depsCfg := deps.DepsCfg{Configs: res, Fs: fs, LogLevel: s.Cfg.LogLevel, LogOut: &s.logBuff}
 		sites, err := NewHugoSites(depsCfg)
 		if err != nil {
 			initErr = err
+			return
+		}
+		if sites == nil {
+			initErr = errors.New("no sites")
 			return
 		}
 
@@ -482,13 +514,19 @@ type IntegrationTestConfig struct {
 	// https://pkg.go.dev/golang.org/x/exp/cmd/txtar
 	TxtarString string
 
+	// COnfig to use as the base. We will also read the config from the txtar.
+	BaseCfg config.Provider
+
+	// Environment variables passed to the config loader.
+	Environ []string
+
 	// Whether to simulate server mode.
 	Running bool
 
 	// Will print the log buffer after the build
 	Verbose bool
 
-	LogLevel jww.Threshold
+	LogLevel logg.Level
 
 	// Whether it needs the real file system (e.g. for js.Build tests).
 	NeedsOsFS bool
@@ -503,4 +541,6 @@ type IntegrationTestConfig struct {
 	NeedsNpmInstall bool
 
 	WorkingDir string
+
+	BuildCfg BuildCfg
 }

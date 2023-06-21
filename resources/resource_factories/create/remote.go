@@ -171,10 +171,17 @@ func (c *Client) FromRemote(uri string, optionsm map[string]any) (resource.Resou
 
 	contentType := res.Header.Get("Content-Type")
 
-	if isHeadMethod {
-		// We have no body to work with, so we need to use the Content-Type header.
-		mediaType, _ = media.FromString(contentType)
-	} else {
+	// For HEAD requests we have no body to work with, so we need to use the Content-Type header.
+	if isHeadMethod || c.rs.ExecHelper.Sec().HTTP.MediaTypes.Accept(contentType) {
+		var found bool
+		mediaType, found = c.rs.MediaTypes().GetByType(contentType)
+		if !found {
+			// A media type not configured in Hugo, just create one from the content type string.
+			mediaType, _ = media.FromString(contentType)
+		}
+	}
+
+	if mediaType.IsZero() {
 
 		var extensionHints []string
 
@@ -197,7 +204,7 @@ func (c *Client) FromRemote(uri string, optionsm map[string]any) (resource.Resou
 		}
 
 		// Now resolve the media type primarily using the content.
-		mediaType = media.FromContent(c.rs.MediaTypes, extensionHints, body)
+		mediaType = media.FromContent(c.rs.MediaTypes(), extensionHints, body)
 
 	}
 

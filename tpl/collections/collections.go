@@ -30,7 +30,6 @@ import (
 	"github.com/gohugoio/hugo/common/maps"
 	"github.com/gohugoio/hugo/common/types"
 	"github.com/gohugoio/hugo/deps"
-	"github.com/gohugoio/hugo/helpers"
 	"github.com/gohugoio/hugo/langs"
 	"github.com/gohugoio/hugo/tpl/compare"
 	"github.com/spf13/cast"
@@ -43,11 +42,11 @@ func init() {
 
 // New returns a new instance of the collections-namespaced template functions.
 func New(deps *deps.Deps) *Namespace {
-	if deps.Language == nil {
+	language := deps.Conf.Language()
+	if language == nil {
 		panic("language must be set")
 	}
-
-	loc := langs.GetLocation(deps.Language)
+	loc := langs.GetLocation(language)
 
 	return &Namespace{
 		loc:      loc,
@@ -393,7 +392,7 @@ func (ns *Namespace) IsSet(c any, key any) (bool, error) {
 			return av.MapIndex(kv).IsValid(), nil
 		}
 	default:
-		helpers.DistinctErrorLog.Printf("WARNING: calling IsSet with unsupported type %q (%T) will always return false.\n", av.Kind(), c)
+		ns.deps.Log.Warnf("calling IsSet with unsupported type %q (%T) will always return false.\n", av.Kind(), c)
 	}
 
 	return false, nil

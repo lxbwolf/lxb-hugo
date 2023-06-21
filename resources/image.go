@@ -126,7 +126,7 @@ func (i *imageResource) getExif() *exif.ExifInfo {
 			return enc.Encode(i.meta)
 		}
 
-		_, i.metaInitErr = i.getSpec().imageCache.fileCache.ReadOrCreate(key, read, create)
+		_, i.metaInitErr = i.getSpec().ImageCache.fileCache.ReadOrCreate(key, read, create)
 	})
 
 	if i.metaInitErr != nil {
@@ -296,7 +296,7 @@ const imageProcWorkers = 1
 var imageProcSem = make(chan bool, imageProcWorkers)
 
 func (i *imageResource) doWithImageConfig(conf images.ImageConfig, f func(src image.Image) (image.Image, error)) (images.ImageResource, error) {
-	img, err := i.getSpec().imageCache.getOrCreate(i, conf, func() (*imageResource, image.Image, error) {
+	img, err := i.getSpec().ImageCache.getOrCreate(i, conf, func() (*imageResource, image.Image, error) {
 		imageProcSem <- true
 		defer func() {
 			<-imageProcSem
@@ -323,7 +323,7 @@ func (i *imageResource) doWithImageConfig(conf images.ImageConfig, f func(src im
 		if shouldFill {
 			bgColor = conf.BgColor
 			if bgColor == nil {
-				bgColor = i.Proc.Cfg.BgColor
+				bgColor = i.Proc.Cfg.Config.BgColor
 			}
 			tmp := image.NewRGBA(converted.Bounds())
 			draw.Draw(tmp, tmp.Bounds(), image.NewUniform(bgColor), image.Point{}, draw.Src)
@@ -380,7 +380,7 @@ func (g *giphy) GIF() *gif.GIF {
 }
 
 // DecodeImage decodes the image source into an Image.
-// This an internal method and may change.
+// This for internal use only.
 func (i *imageResource) DecodeImage() (image.Image, error) {
 	f, err := i.ReadSeekCloser()
 	if err != nil {
@@ -423,7 +423,7 @@ func (i *imageResource) setBasePath(conf images.ImageConfig) {
 func (i *imageResource) getImageMetaCacheTargetPath() string {
 	const imageMetaVersionNumber = 1 // Increment to invalidate the meta cache
 
-	cfgHash := i.getSpec().imaging.Cfg.CfgHash
+	cfgHash := i.getSpec().imaging.Cfg.SourceHash
 	df := i.getResourcePaths().relTargetDirFile
 	if fi := i.getFileInfo(); fi != nil {
 		df.dir = filepath.Dir(fi.Meta().Path)

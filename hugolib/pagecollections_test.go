@@ -41,13 +41,18 @@ func BenchmarkGetPage(b *testing.B) {
 		r       = rand.New(rand.NewSource(time.Now().UnixNano()))
 	)
 
+	configs, err := loadTestConfigFromProvider(cfg)
+	if err != nil {
+		b.Fatal(err)
+	}
+
 	for i := 0; i < 10; i++ {
 		for j := 0; j < 100; j++ {
 			writeSource(b, fs, filepath.Join("content", fmt.Sprintf("sect%d", i), fmt.Sprintf("page%d.md", j)), "CONTENT")
 		}
 	}
 
-	s := buildSingleSite(b, deps.DepsCfg{Fs: fs, Cfg: cfg}, BuildCfg{SkipRender: true})
+	s := buildSingleSite(b, deps.DepsCfg{Fs: fs, Configs: configs}, BuildCfg{SkipRender: true})
 
 	pagePaths := make([]string, b.N)
 
@@ -76,6 +81,11 @@ func createGetPageRegularBenchmarkSite(t testing.TB) *Site {
 		cfg, fs = newTestCfg()
 	)
 
+	configs, err := loadTestConfigFromProvider(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	pc := func(title string) string {
 		return fmt.Sprintf(pageCollectionsPageTemplate, title)
 	}
@@ -87,7 +97,7 @@ func createGetPageRegularBenchmarkSite(t testing.TB) *Site {
 		}
 	}
 
-	return buildSingleSite(c, deps.DepsCfg{Fs: fs, Cfg: cfg}, BuildCfg{SkipRender: true})
+	return buildSingleSite(c, deps.DepsCfg{Fs: fs, Configs: configs}, BuildCfg{SkipRender: true})
 }
 
 func TestBenchmarkGetPageRegular(t *testing.T) {
@@ -174,6 +184,9 @@ func TestGetPage(t *testing.T) {
 		c       = qt.New(t)
 	)
 
+	configs, err := loadTestConfigFromProvider(cfg)
+	c.Assert(err, qt.IsNil)
+
 	pc := func(title string) string {
 		return fmt.Sprintf(pageCollectionsPageTemplate, title)
 	}
@@ -210,7 +223,7 @@ func TestGetPage(t *testing.T) {
 	writeSource(t, fs, filepath.Join("content", "section_bundle_overlap", "_index.md"), pc("index overlap section"))
 	writeSource(t, fs, filepath.Join("content", "section_bundle_overlap_bundle", "index.md"), pc("index overlap bundle"))
 
-	s := buildSingleSite(t, deps.DepsCfg{Fs: fs, Cfg: cfg}, BuildCfg{SkipRender: true})
+	s := buildSingleSite(t, deps.DepsCfg{Fs: fs, Configs: configs}, BuildCfg{SkipRender: true})
 
 	sec3, err := s.getPageNew(nil, "/sect3")
 	c.Assert(err, qt.IsNil)
@@ -222,7 +235,7 @@ func TestGetPage(t *testing.T) {
 		{"Root relative, no slash, root page", page.KindPage, nil, []string{"about.md", "ABOUT.md"}, "about page"},
 		{"Root relative, no slash, section", page.KindSection, nil, []string{"sect3"}, "section 3"},
 		{"Root relative, no slash, section page", page.KindPage, nil, []string{"sect3/page1.md"}, "Title3_1"},
-		{"Root relative, no slash, sub setion", page.KindSection, nil, []string{"sect3/sect7"}, "another sect7"},
+		{"Root relative, no slash, sub section", page.KindSection, nil, []string{"sect3/sect7"}, "another sect7"},
 		{"Root relative, no slash, nested page", page.KindPage, nil, []string{"sect3/subsect/deep.md"}, "deep page"},
 		{"Root relative, no slash, OS slashes", page.KindPage, nil, []string{filepath.FromSlash("sect5/page3.md")}, "Title5_3"},
 
@@ -234,7 +247,7 @@ func TestGetPage(t *testing.T) {
 		// content root relative paths without a leading slash, the lookup
 		// returns /sect7. This undermines ambiguity detection, but we have no choice.
 		//{"Ambiguous", nil, []string{"sect7"}, ""},
-		{"Section, ambigous", page.KindSection, nil, []string{"sect7"}, "Sect7s"},
+		{"Section, ambiguous", page.KindSection, nil, []string{"sect7"}, "Sect7s"},
 
 		{"Absolute, home", page.KindHome, nil, []string{"/", ""}, "home page"},
 		{"Absolute, page", page.KindPage, nil, []string{"/about.md", "/about"}, "about page"},
@@ -294,7 +307,7 @@ func TestGetPage(t *testing.T) {
 			if test.context == nil {
 				for _, ref := range test.pathVariants {
 					args := append([]string{test.kind}, ref)
-					page, err := s.Info.GetPage(args...)
+					page, err := s.GetPage(args...)
 					test.check(page, err, errorMsg, c)
 				}
 			}
