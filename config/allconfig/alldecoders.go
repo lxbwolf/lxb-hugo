@@ -138,8 +138,8 @@ var allDecoderSetups = map[string]decodeWeight{
 			return err
 		},
 	},
-	"mediaTypes": {
-		key: "mediaTypes",
+	"mediatypes": {
+		key: "mediatypes",
 		decode: func(d decodeWeight, p decodeConfig) error {
 			var err error
 			p.c.MediaTypes, err = media.DecodeTypes(p.p.GetStringMap(d.key))
@@ -150,7 +150,7 @@ var allDecoderSetups = map[string]decodeWeight{
 		key: "outputs",
 		decode: func(d decodeWeight, p decodeConfig) error {
 			defaults := createDefaultOutputFormats(p.c.OutputFormats.Config)
-			m := p.p.GetStringMap("outputs")
+			m := maps.CleanConfigStringMap(p.p.GetStringMap("outputs"))
 			p.c.Outputs = make(map[string][]string)
 			for k, v := range m {
 				s := types.ToStringSlicePreserveString(v)
@@ -168,8 +168,8 @@ var allDecoderSetups = map[string]decodeWeight{
 			return nil
 		},
 	},
-	"outputFormats": {
-		key: "outputFormats",
+	"outputformats": {
+		key: "outputformats",
 		decode: func(d decodeWeight, p decodeConfig) error {
 			var err error
 			p.c.OutputFormats, err = output.DecodeConfig(p.c.MediaTypes.Config, p.p.Get(d.key))
@@ -206,8 +206,9 @@ var allDecoderSetups = map[string]decodeWeight{
 	"permalinks": {
 		key: "permalinks",
 		decode: func(d decodeWeight, p decodeConfig) error {
-			p.c.Permalinks = maps.CleanConfigStringMapString(p.p.GetStringMapString(d.key))
-			return nil
+			var err error
+			p.c.Permalinks, err = page.DecodePermalinksConfig(p.p.GetStringMap(d.key))
+			return err
 		},
 	},
 	"sitemap": {
@@ -368,4 +369,20 @@ var allDecoderSetups = map[string]decodeWeight{
 			return mapstructure.WeakDecode(p.p.GetStringMap(d.key), &p.c.Internal)
 		},
 	},
+}
+
+func init() {
+	for k, v := range allDecoderSetups {
+		// Verify that k and v.key is all lower case.
+		if k != strings.ToLower(k) {
+			panic(fmt.Sprintf("key %q is not lower case", k))
+		}
+		if v.key != strings.ToLower(v.key) {
+			panic(fmt.Sprintf("key %q is not lower case", v.key))
+		}
+
+		if k != v.key {
+			panic(fmt.Sprintf("key %q is not the same as the map key %q", k, v.key))
+		}
+	}
 }

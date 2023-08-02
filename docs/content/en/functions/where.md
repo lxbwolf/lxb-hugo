@@ -73,14 +73,16 @@ The following logical operators are available with `where`:
 `intersect`
 : `true` if a given field value that is a slice/array of strings or integers contains elements in common with the matching value; it follows the same rules as the [`intersect` function][intersect].
 
-## Use `where` with `Booleans`
+`like`
+: `true` if a given field value matches a regular expression. Use the `like` operator to compare `string` values. Returns `false` when comparing other data types to the regular expression.
+
+## Use `where` with boolean values
 When using booleans you should not put quotation marks.
 ```go-html-template
 {{ range where .Pages "Draft" true }}
         <p>{{ .Title }}</p>
 {{ end }}
 ```
-  
 
 ## Use `where` with `intersect`
 
@@ -102,6 +104,31 @@ You can also put the returned value of the `where` clauses into a variable:
 {{ end }}
 {{< /code >}}
 
+## Use `where` with `like`
+
+This example matches pages where the "foo" parameter begins with "ab":
+
+```go-html-template
+{{ range where site.RegularPages "Params.foo" "like" "^ab" }}
+  <h2><a href="{{ .RelPermalink }}">{{ .LinkTitle }}</a></h2>
+{{ end }}
+```
+
+When specifying the regular expression, use a raw [string literal] (backticks) instead of an interpreted string literal (double quotes) to simplify the syntax. With an interpreted string literal you must escape backslashes.
+
+[string literal]: https://go.dev/ref/spec#String_literals
+
+Go's regular expression package implements the [RE2 syntax]. Note that the RE2 `\C` escape sequence is not supported.
+
+[RE2 syntax]: https://github.com/google/re2/wiki/Syntax/
+
+{{% note %}}
+The RE2 syntax is a subset of that accepted by [PCRE], roughly speaking, and with various [caveats].
+
+[caveats]: https://swtch.com/~rsc/regexp/regexp3.html#caveats
+[PCRE]: https://www.pcre.org/
+{{% /note %}}
+
 ## Use `where` with `first`
 
 Using `first` and `where` together can be very
@@ -116,7 +143,7 @@ then ranges through only the first 5 posts in that list:
 {{ end }}
 {{< /code >}}
 
-## Nest `where` Clauses
+## Nest `where` clauses
 
 You can also nest `where` clauses to drill down on lists of content by more than one parameter. The following first grabs all pages in the "blog" section and then ranges through the result of the first `where` clause and finds all pages that are *not* featured:
 
@@ -124,7 +151,7 @@ You can also nest `where` clauses to drill down on lists of content by more than
 {{ range where (where .Pages "Section" "blog" ) "Params.featured" "!=" true }}
 ```
 
-## Unset Fields
+## Unset fields
 
 Filtering only works for set fields. To check whether a field is set or exists, you can use the operand `nil`.
 
@@ -153,8 +180,7 @@ section names to hard-coded values like `"posts"` or `"post"`.
 {{ $pages := where site.RegularPages "Type" "in" site.Params.mainSections }}
 ```
 
-If the user has not set this config parameter in their site config, it
-will default to the *section with the most pages*.
+If the user has not set this configuration parameter in their site configuration, it will default to the *section with the most pages*.
 
 The user can override the default:
 

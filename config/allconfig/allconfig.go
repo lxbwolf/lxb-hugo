@@ -45,6 +45,7 @@ import (
 	"github.com/gohugoio/hugo/output"
 	"github.com/gohugoio/hugo/related"
 	"github.com/gohugoio/hugo/resources/images"
+	"github.com/gohugoio/hugo/resources/kinds"
 	"github.com/gohugoio/hugo/resources/page"
 	"github.com/gohugoio/hugo/resources/page/pagemeta"
 	"github.com/spf13/afero"
@@ -57,12 +58,11 @@ type InternalConfig struct {
 	// Server mode?
 	Running bool
 
-	Quiet             bool
-	Verbose           bool
-	Clock             string
-	Watch             bool
-	DisableLiveReload bool
-	LiveReloadPort    int
+	Quiet          bool
+	Verbose        bool
+	Clock          string
+	Watch          bool
+	LiveReloadPort int
 }
 
 // All non-params config keys for language.
@@ -150,7 +150,7 @@ type Config struct {
 	Minify minifiers.MinifyConfig `mapstructure:"-"`
 
 	// Permalink configuration.
-	Permalinks map[string]string `mapstructure:"-"`
+	Permalinks map[string]map[string]string `mapstructure:"-"`
 
 	// Taxonomy configuration.
 	Taxonomies map[string]string `mapstructure:"-"`
@@ -240,9 +240,14 @@ func (c *Config) CompileConfig(logger loggers.Logger) error {
 	disabledKinds := make(map[string]bool)
 	for _, kind := range c.DisableKinds {
 		kind = strings.ToLower(kind)
-		if kind == "taxonomyterm" {
+		if newKind := kinds.IsDeprecatedAndReplacedWith(kind); newKind != "" {
+			logger.Deprecatef(false, "Kind %q used in disableKinds is deprecated, use %q instead.", kind, newKind)
 			// Legacy config.
-			kind = "term"
+			kind = newKind
+		}
+		if kinds.GetKindAny(kind) == "" {
+			logger.Warnf("Unknown kind %q in disableKinds configuration.", kind)
+			continue
 		}
 		disabledKinds[kind] = true
 	}
@@ -250,7 +255,15 @@ func (c *Config) CompileConfig(logger loggers.Logger) error {
 	isRssDisabled := disabledKinds["rss"]
 	outputFormats := c.OutputFormats.Config
 	for kind, formats := range c.Outputs {
+		if newKind := kinds.IsDeprecatedAndReplacedWith(kind); newKind != "" {
+			logger.Deprecatef(false, "Kind %q used in outputs configuration is deprecated, use %q instead.", kind, newKind)
+			kind = newKind
+		}
 		if disabledKinds[kind] {
+			continue
+		}
+		if kinds.GetKindAny(kind) == "" {
+			logger.Warnf("Unknown kind %q in outputs configuration.", kind)
 			continue
 		}
 		for _, format := range formats {
@@ -273,6 +286,14 @@ func (c *Config) CompileConfig(logger loggers.Logger) error {
 			return fmt.Errorf("cannot disable default content language %q", lang)
 		}
 		disabledLangs[lang] = true
+	}
+	for lang, language := range c.Languages {
+		if language.Disabled {
+			disabledLangs[lang] = true
+			if lang == c.DefaultContentLanguage {
+				return fmt.Errorf("cannot disable default content language %q", lang)
+			}
+		}
 	}
 
 	ignoredErrors := make(map[string]bool)
@@ -446,6 +467,9 @@ type RootConfig struct {
 	// Disable the injection of the Hugo generator tag on the home page.
 	DisableHugoGeneratorInject bool
 
+	// Disable live reloading in server mode.
+	DisableLiveReload bool
+
 	// Enable replacement in Pages' Content of Emoji shortcodes with their equivalent Unicode characters.
 	// <docsmeta>{"identifiers": ["Content", "Unicode"] }</docsmeta>
 	EnableEmoji bool
@@ -484,12 +508,6 @@ type RootConfig struct {
 	// Enable to print greppable placeholders (on the form "[i18n] TRANSLATIONID") for missing translation strings.
 	EnableMissingTranslationPlaceholders bool
 
-	// Enable to print warnings for missing translation strings.
-	LogI18nWarnings bool
-
-	// ENable to print warnings for multiple files published to the same destination.
-	LogPathWarnings bool
-
 	// Enable to panic on warning log entries. This may make it easier to detect the source.
 	PanicOnWarning bool
 
@@ -525,6 +543,12 @@ type RootConfig struct {
 	// Whether to track and print unused templates during the build.
 	PrintUnusedTemplates bool
 
+	// Enable to print warnings for missing translation strings.
+	PrintI18nWarnings bool
+
+	// ENable to print warnings for multiple files published to the same destination.
+	PrintPathWarnings bool
+
 	// URL to be used as a placeholder when a page reference cannot be found in ref or relref. Is used as-is.
 	RefLinksNotFoundURL string
 
@@ -545,7 +569,7 @@ type RootConfig struct {
 	// See Modules for more a more flexible way to load themes.
 	Theme []string
 
-	// Timeout for generating page contents, specified as a duration or in milliseconds.
+	// Timeout for generating page contents, specified as a duration or in seconds.
 	Timeout string
 
 	// The time zone (or location), e.g. Europe/Oslo, used to parse front matter dates without such information and in the time function.
@@ -719,7 +743,8 @@ func fromLoadConfigResult(fs afero.Fs, logger loggers.Logger, res config.LoadCon
 	cfg := res.Cfg
 
 	all := &Config{}
-	err := decodeConfigFromParams(fs, bcfg, cfg, all, nil)
+
+	err := decodeConfigFromParams(fs, logger, bcfg, cfg, all, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -807,7 +832,7 @@ func fromLoadConfigResult(fs afero.Fs, logger loggers.Logger, res config.LoadCon
 			// Create a copy of the complete config and replace the root keys with the language specific ones.
 			clone := all.cloneForLang()
 
-			if err := decodeConfigFromParams(fs, bcfg, mergedConfig, clone, differentRootKeys); err != nil {
+			if err := decodeConfigFromParams(fs, logger, bcfg, mergedConfig, clone, differentRootKeys); err != nil {
 				return nil, fmt.Errorf("failed to decode config for language %q: %w", k, err)
 			}
 			if err := clone.CompileConfig(logger); err != nil {
@@ -861,6 +886,10 @@ func fromLoadConfigResult(fs afero.Fs, logger loggers.Logger, res config.LoadCon
 
 	bcfg.PublishDir = all.PublishDir
 	res.BaseConfig = bcfg
+	all.CommonDirs.CacheDir = bcfg.CacheDir
+	for _, l := range langConfigs {
+		l.CommonDirs.CacheDir = bcfg.CacheDir
+	}
 
 	cm := &Configs{
 		Base:                  all,
@@ -875,7 +904,7 @@ func fromLoadConfigResult(fs afero.Fs, logger loggers.Logger, res config.LoadCon
 	return cm, nil
 }
 
-func decodeConfigFromParams(fs afero.Fs, bcfg config.BaseConfig, p config.Provider, target *Config, keys []string) error {
+func decodeConfigFromParams(fs afero.Fs, logger loggers.Logger, bcfg config.BaseConfig, p config.Provider, target *Config, keys []string) error {
 
 	var decoderSetups []decodeWeight
 
@@ -888,7 +917,7 @@ func decodeConfigFromParams(fs afero.Fs, bcfg config.BaseConfig, p config.Provid
 			if v, found := allDecoderSetups[key]; found {
 				decoderSetups = append(decoderSetups, v)
 			} else {
-				return fmt.Errorf("unknown config key %q", key)
+				logger.Warnf("Skip unknown config key %q", key)
 			}
 		}
 	}
@@ -925,11 +954,11 @@ func createDefaultOutputFormats(allFormats output.Formats) map[string][]string {
 	}
 
 	m := map[string][]string{
-		page.KindPage:     {htmlOut.Name},
-		page.KindHome:     defaultListTypes,
-		page.KindSection:  defaultListTypes,
-		page.KindTerm:     defaultListTypes,
-		page.KindTaxonomy: defaultListTypes,
+		kinds.KindPage:     {htmlOut.Name},
+		kinds.KindHome:     defaultListTypes,
+		kinds.KindSection:  defaultListTypes,
+		kinds.KindTerm:     defaultListTypes,
+		kinds.KindTaxonomy: defaultListTypes,
 	}
 
 	// May be disabled

@@ -30,7 +30,7 @@ import (
 
 	"go.uber.org/automaxprocs/maxprocs"
 
-	"github.com/bep/clock"
+	"github.com/bep/clocks"
 	"github.com/bep/lazycache"
 	"github.com/bep/logg"
 	"github.com/bep/overlayfs"
@@ -110,12 +110,10 @@ type rootCommand struct {
 	environment string
 
 	// Common build flags.
-	baseURL              string
-	gc                   bool
-	poll                 string
-	forceSyncStatic      bool
-	printPathWarnings    bool
-	printUnusedTemplates bool
+	baseURL         string
+	gc              bool
+	poll            string
+	forceSyncStatic bool
 
 	// Profile flags (for debugging of performance problems)
 	cpuprofile   string
@@ -134,6 +132,10 @@ type rootCommand struct {
 
 	cfgFile string
 	cfgDir  string
+}
+
+func (r *rootCommand) isVerbose() bool {
+	return r.logger.Level() <= logg.LevelInfo
 }
 
 func (r *rootCommand) Build(cd *simplecobra.Commandeer, bcfg hugolib.BuildCfg, cfg config.Provider) (*hugolib.HugoSites, error) {
@@ -171,7 +173,7 @@ func (r *rootCommand) ConfigFromConfig(key int32, oldConf *commonConfig) (*commo
 
 		if !configs.Base.C.Clock.IsZero() {
 			// TODO(bep) find a better place for this.
-			htime.Clock = clock.Start(configs.Base.C.Clock)
+			htime.Clock = clocks.Start(configs.Base.C.Clock)
 		}
 
 		return &commonConfig{
@@ -281,10 +283,10 @@ func (r *rootCommand) ConfigFromProvider(key int32, cfg config.Provider) (*commo
 
 		if !base.C.Clock.IsZero() {
 			// TODO(bep) find a better place for this.
-			htime.Clock = clock.Start(configs.Base.C.Clock)
+			htime.Clock = clocks.Start(configs.Base.C.Clock)
 		}
 
-		if base.LogPathWarnings {
+		if base.PrintPathWarnings {
 			// Note that we only care about the "dynamic creates" here,
 			// so skip the static fs.
 			fs.PublishDir = hugofs.NewCreateCountingFs(fs.PublishDir)
@@ -513,7 +515,7 @@ Complete documentation is available at https://gohugo.io/.`
 func applyLocalFlagsBuildConfig(cmd *cobra.Command, r *rootCommand) {
 	cmd.Flags().StringSliceP("theme", "t", []string{}, "themes to use (located in /themes/THEMENAME/)")
 	cmd.Flags().StringVarP(&r.baseURL, "baseURL", "b", "", "hostname (and path) to the root, e.g. https://spf13.com/")
-	cmd.Flags().StringP("cacheDir", "", "", "filesystem path to cache directory. Defaults: $TMPDIR/hugo_cache_$USER/")
+	cmd.Flags().StringP("cacheDir", "", "", "filesystem path to cache directory")
 	_ = cmd.Flags().SetAnnotation("cacheDir", cobra.BashCompSubdirsInDir, []string{})
 	cmd.Flags().StringP("contentDir", "c", "", "filesystem path to content directory")
 	_ = cmd.Flags().SetAnnotation("theme", cobra.BashCompSubdirsInDir, []string{"themes"})
@@ -540,8 +542,8 @@ func applyLocalFlagsBuild(cmd *cobra.Command, r *rootCommand) {
 	cmd.Flags().BoolP("noChmod", "", false, "don't sync permission mode of files")
 	cmd.Flags().BoolP("noBuildLock", "", false, "don't create .hugo_build.lock file")
 	cmd.Flags().BoolP("printI18nWarnings", "", false, "print missing translations")
-	cmd.Flags().BoolVarP(&r.printPathWarnings, "printPathWarnings", "", false, "print warnings on duplicate target paths etc.")
-	cmd.Flags().BoolVarP(&r.printUnusedTemplates, "printUnusedTemplates", "", false, "print warnings on unused templates.")
+	cmd.Flags().BoolP("printPathWarnings", "", false, "print warnings on duplicate target paths etc.")
+	cmd.Flags().BoolP("printUnusedTemplates", "", false, "print warnings on unused templates.")
 	cmd.Flags().StringVarP(&r.cpuprofile, "profile-cpu", "", "", "write cpu profile to `file`")
 	cmd.Flags().StringVarP(&r.memprofile, "profile-mem", "", "", "write memory profile to `file`")
 	cmd.Flags().BoolVarP(&r.printm, "printMemoryUsage", "", false, "print memory usage to screen at intervals")

@@ -23,7 +23,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
@@ -470,14 +469,6 @@ func (c *serverCommand) Name() string {
 }
 
 func (c *serverCommand) Run(ctx context.Context, cd *simplecobra.Commandeer, args []string) error {
-	err := func() error {
-		defer c.r.timeTrack(time.Now(), "Built")
-		err := c.build()
-		return err
-	}()
-	if err != nil {
-		return err
-	}
 
 	// Watch runs its own server as part of the routine
 	if c.serverWatch {
@@ -499,6 +490,15 @@ func (c *serverCommand) Run(ctx context.Context, cd *simplecobra.Commandeer, arg
 
 		defer watcher.Close()
 
+	}
+
+	err := func() error {
+		defer c.r.timeTrack(time.Now(), "Built")
+		err := c.build()
+		return err
+	}()
+	if err != nil {
+		return err
 	}
 
 	return c.serve()
@@ -685,9 +685,9 @@ func (c *serverCommand) createCertificates(conf *commonConfig) error {
 	c.tlsKeyFile = filepath.Join(keyDir, fmt.Sprintf("%s-key.pem", hostname))
 
 	// Check if the certificate already exists and is valid.
-	certPEM, err := ioutil.ReadFile(c.tlsCertFile)
+	certPEM, err := os.ReadFile(c.tlsCertFile)
 	if err == nil {
-		rootPem, err := ioutil.ReadFile(filepath.Join(mclib.GetCAROOT(), "rootCA.pem"))
+		rootPem, err := os.ReadFile(filepath.Join(mclib.GetCAROOT(), "rootCA.pem"))
 		if err == nil {
 			if err := c.verifyCert(rootPem, certPEM, hostname); err == nil {
 				c.r.Println("Using existing", c.tlsCertFile, "and", c.tlsKeyFile)

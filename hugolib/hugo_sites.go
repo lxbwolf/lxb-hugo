@@ -47,6 +47,7 @@ import (
 	"github.com/gohugoio/hugo/helpers"
 	"github.com/gohugoio/hugo/lazy"
 
+	"github.com/gohugoio/hugo/resources/kinds"
 	"github.com/gohugoio/hugo/resources/page"
 	"github.com/gohugoio/hugo/resources/page/pagemeta"
 	"github.com/gohugoio/hugo/tpl"
@@ -76,6 +77,8 @@ type HugoSites struct {
 
 	contentInit sync.Once
 	content     *pageMaps
+
+	postRenderInit sync.Once
 
 	// Keeps track of bundle directories and symlinks to enable partial rebuilding.
 	ContentChanges *contentChangeMap
@@ -435,13 +438,13 @@ func (cfg *BuildCfg) shouldRender(p *pageState) bool {
 }
 
 func (h *HugoSites) renderCrossSitesSitemap() error {
-	if !h.isMultiLingual() || h.Conf.IsMultihost() {
+	if h.Conf.IsMultihost() || !(h.Conf.DefaultContentLanguageInSubdir() || h.Conf.IsMultiLingual()) {
 		return nil
 	}
 
 	sitemapEnabled := false
 	for _, s := range h.Sites {
-		if s.conf.IsKindEnabled(kindSitemap) {
+		if s.conf.IsKindEnabled(kinds.KindSitemap) {
 			sitemapEnabled = true
 			break
 		}
@@ -472,7 +475,7 @@ func (h *HugoSites) renderCrossSitesRobotsTXT() error {
 
 	p, err := newPageStandalone(&pageMeta{
 		s:    s,
-		kind: kindRobotsTXT,
+		kind: kinds.KindRobotsTXT,
 		urlPaths: pagemeta.URLPath{
 			URL: "robots.txt",
 		},
@@ -521,7 +524,7 @@ func (h *HugoSites) createPageCollections() error {
 	})
 
 	allRegularPages := newLazyPagesFactory(func() page.Pages {
-		return h.findPagesByKindIn(page.KindPage, allPages.get())
+		return h.findPagesByKindIn(kinds.KindPage, allPages.get())
 	})
 
 	for _, s := range h.Sites {
@@ -553,13 +556,14 @@ func (h *HugoSites) loadData(fis []hugofs.FileMetaInfo) (err error) {
 
 	h.data = make(map[string]any)
 	for _, fi := range fis {
+		basePath := fi.Meta().Path
 		fileSystem := spec.NewFilesystemFromFileMetaInfo(fi)
 		files, err := fileSystem.Files()
 		if err != nil {
 			return err
 		}
 		for _, r := range files {
-			if err := h.handleDataFile(r); err != nil {
+			if err := h.handleDataFile(basePath, r); err != nil {
 				return err
 			}
 		}
@@ -568,7 +572,7 @@ func (h *HugoSites) loadData(fis []hugofs.FileMetaInfo) (err error) {
 	return
 }
 
-func (h *HugoSites) handleDataFile(r source.File) error {
+func (h *HugoSites) handleDataFile(basePath string, r source.File) error {
 	var current map[string]any
 
 	f, err := r.FileInfo().Meta().Open()
@@ -579,7 +583,8 @@ func (h *HugoSites) handleDataFile(r source.File) error {
 
 	// Crawl in data tree to insert data
 	current = h.data
-	keyParts := strings.Split(r.Dir(), helpers.FilePathSeparator)
+	dataPath := filepath.Join(basePath, r.Dir())
+	keyParts := strings.Split(dataPath, helpers.FilePathSeparator)
 
 	for _, key := range keyParts {
 		if key != "" {

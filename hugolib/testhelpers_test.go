@@ -834,7 +834,9 @@ func (s *sitesBuilder) GetPageRel(p page.Page, ref string) page.Page {
 
 func (s *sitesBuilder) NpmInstall() hexec.Runner {
 	sc := security.DefaultConfig
-	sc.Exec.Allow = security.NewWhitelist("npm")
+	var err error
+	sc.Exec.Allow, err = security.NewWhitelist("npm")
+	s.Assert(err, qt.IsNil)
 	ex := hexec.New(sc)
 	command, err := ex.New("npm", "install")
 	s.Assert(err, qt.IsNil)
@@ -935,8 +937,7 @@ func newTestCfgBasic() (config.Provider, *hugofs.Fs) {
 func newTestCfg(withConfig ...func(cfg config.Provider) error) (config.Provider, *hugofs.Fs) {
 	mm := afero.NewMemMapFs()
 	cfg := config.New()
-	// Default is false, but true is easier to use as default in tests
-	cfg.Set("defaultContentLanguageInSubdir", true)
+	cfg.Set("defaultContentLanguageInSubdir", false)
 	cfg.Set("publishDir", "public")
 
 	fs := hugofs.NewFromOld(hugofs.NewBaseFileDecorator(mm), cfg)

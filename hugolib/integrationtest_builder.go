@@ -137,6 +137,24 @@ func (s *IntegrationTestBuilder) AssertBuildCountTranslations(count int) {
 	s.Assert(s.H.init.translations.InitCount(), qt.Equals, count)
 }
 
+func (s *IntegrationTestBuilder) AssertFileCount(dirname string, expected int) {
+	s.Helper()
+	fs := s.fs.WorkingDirReadOnly
+	count := 0
+	afero.Walk(fs, dirname, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		count++
+		return nil
+	})
+	s.Assert(count, qt.Equals, expected)
+
+}
+
 func (s *IntegrationTestBuilder) AssertFileContent(filename string, matches ...string) {
 	s.Helper()
 	content := strings.TrimSpace(s.FileContent(filename))
@@ -145,6 +163,15 @@ func (s *IntegrationTestBuilder) AssertFileContent(filename string, matches ...s
 		for _, match := range lines {
 			match = strings.TrimSpace(match)
 			if match == "" || strings.HasPrefix(match, "#") {
+				continue
+			}
+			var negate bool
+			if strings.HasPrefix(match, "! ") {
+				negate = true
+				match = strings.TrimPrefix(match, "! ")
+			}
+			if negate {
+				s.Assert(content, qt.Not(qt.Contains), match, qt.Commentf(m))
 				continue
 			}
 			s.Assert(content, qt.Contains, match, qt.Commentf(m))
@@ -205,6 +232,10 @@ func (s *IntegrationTestBuilder) Build() *IntegrationTestBuilder {
 	return s
 }
 
+func (s *IntegrationTestBuilder) LogString() string {
+	return s.logBuff.String()
+}
+
 func (s *IntegrationTestBuilder) BuildE() (*IntegrationTestBuilder, error) {
 	s.Helper()
 	if err := s.initBuilder(); err != nil {
@@ -213,6 +244,14 @@ func (s *IntegrationTestBuilder) BuildE() (*IntegrationTestBuilder, error) {
 
 	err := s.build(s.Cfg.BuildCfg)
 	return s, err
+}
+
+func (s *IntegrationTestBuilder) Init() *IntegrationTestBuilder {
+	if err := s.initBuilder(); err != nil {
+		s.Fatalf("Failed to init builder: %s", err)
+	}
+	return s
+
 }
 
 type IntegrationTestDebugConfig struct {
@@ -343,12 +382,23 @@ func (s *IntegrationTestBuilder) initBuilder() error {
 			flags.Set("workingDir", s.Cfg.WorkingDir)
 		}
 
+		w := &s.logBuff
+
+		logger := loggers.New(
+			loggers.Options{
+				Stdout:   w,
+				Stderr:   w,
+				Level:    s.Cfg.LogLevel,
+				Distinct: true,
+			},
+		)
+
 		res, err := allconfig.LoadConfig(
 			allconfig.ConfigSourceDescriptor{
 				Flags:     flags,
 				ConfigDir: configDir,
 				Fs:        afs,
-				Logger:    loggers.NewDefault(),
+				Logger:    logger,
 				Environ:   s.Cfg.Environ,
 			},
 		)
@@ -362,7 +412,7 @@ func (s *IntegrationTestBuilder) initBuilder() error {
 
 		s.Assert(err, qt.IsNil)
 
-		depsCfg := deps.DepsCfg{Configs: res, Fs: fs, LogLevel: s.Cfg.LogLevel, LogOut: &s.logBuff}
+		depsCfg := deps.DepsCfg{Configs: res, Fs: fs, LogLevel: logger.Level(), LogOut: logger.Out()}
 		sites, err := NewHugoSites(depsCfg)
 		if err != nil {
 			initErr = err
@@ -381,7 +431,8 @@ func (s *IntegrationTestBuilder) initBuilder() error {
 			s.Assert(os.Chdir(s.Cfg.WorkingDir), qt.IsNil)
 			s.C.Cleanup(func() { os.Chdir(wd) })
 			sc := security.DefaultConfig
-			sc.Exec.Allow = security.NewWhitelist("npm")
+			sc.Exec.Allow, err = security.NewWhitelist("npm")
+			s.Assert(err, qt.IsNil)
 			ex := hexec.New(sc)
 			command, err := ex.New("npm", "install")
 			s.Assert(err, qt.IsNil)

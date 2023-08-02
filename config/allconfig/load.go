@@ -79,6 +79,7 @@ func LoadConfig(d ConfigSourceDescriptor) (*Configs, error) {
 		if err := configs.transientErr(); err != nil {
 			return nil, fmt.Errorf("failed to create config from modules config: %w", err)
 		}
+		configs.LoadingInfo.ConfigFiles = append(configs.LoadingInfo.ConfigFiles, l.ModulesConfigFiles...)
 	} else if err := configs.transientErr(); err != nil {
 		return nil, fmt.Errorf("failed to create config: %w", err)
 	}
@@ -139,7 +140,11 @@ type configLoader struct {
 
 // Handle some legacy values.
 func (l configLoader) applyConfigAliases() error {
-	aliases := []types.KeyValueStr{{Key: "taxonomies", Value: "indexes"}}
+	aliases := []types.KeyValueStr{
+		{Key: "indexes", Value: "taxonomies"},
+		{Key: "logI18nWarnings", Value: "printI18nWarnings"},
+		{Key: "logPathWarnings", Value: "printPathWarnings"},
+	}
 
 	for _, alias := range aliases {
 		if l.cfg.IsSet(alias.Key) {
@@ -289,15 +294,43 @@ func (l configLoader) applyOsEnvOverrides(environ []string) error {
 			} else {
 				l.cfg.Set(env.Key, val)
 			}
-		} else if nestedKey != "" {
-			owner[nestedKey] = env.Value
 		} else {
-			// The container does not exist yet.
-			l.cfg.Set(strings.ReplaceAll(env.Key, delim, "."), env.Value)
+			if nestedKey != "" {
+				owner[nestedKey] = env.Value
+			} else {
+				var val any
+				key := strings.ReplaceAll(env.Key, delim, ".")
+				_, ok := allDecoderSetups[key]
+				if ok {
+					// A map.
+					if v, err := metadecoders.Default.UnmarshalStringTo(env.Value, map[string]interface{}{}); err == nil {
+						val = v
+					}
+				}
+				if val == nil {
+					// A string.
+					val = l.envStringToVal(key, env.Value)
+				}
+				l.cfg.Set(key, val)
+			}
 		}
 	}
 
 	return nil
+}
+
+func (l *configLoader) envStringToVal(k, v string) any {
+	switch k {
+	case "disablekinds", "disablelanguages":
+		if strings.Contains(v, ",") {
+			return strings.Split(v, ",")
+		} else {
+			return strings.Fields(v)
+		}
+	default:
+		return v
+	}
+
 }
 
 func (l *configLoader) loadConfigMain(d ConfigSourceDescriptor) (config.LoadConfigResult, modules.ModulesConfig, error) {
